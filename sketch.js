@@ -96,6 +96,7 @@ class Tile {
     this.content = content;
     this.size = size;
     this.content.setContainerTile(this);
+    this.evictContent = null;
   }
 
   setContent(content) {
@@ -105,6 +106,15 @@ class Tile {
 
   draw() {
     this.content.draw();
+  }
+
+  replaceContent(newContent) {
+    if (newContent.name === this.content.name) {
+      return;
+    }
+    this.evictContent = this.content;
+    this.content = newContent;
+    this.content.setContainerTile(this);
   }
 }
 
@@ -126,11 +136,7 @@ class Air extends Content {
   constructor(mass) {
     super();
     this.name = 'air';
-    if (mass === undefined) {
-      this.mass = 1.3;
-    } else {
-      this.mass = mass;
-    }
+    this.mass = mass || 1.3;
   }
 
   isFlowable() {
@@ -277,7 +283,7 @@ class Rock extends Content {
   constructor(mass) {
     super();
     this.name = 'rock';
-    this.mass = mass;
+    this.mass = mass || 1;
   }
 
   isOverPressure() {
@@ -312,6 +318,8 @@ let debugDiv;
 
 function setup() {
   createCanvas(600, 600);
+  // grid = new Grid(5, 5, 120);
+  // grid = new Grid(10, 10, 60);
   grid = new Grid(20, 20, 30);
   // grid = new Grid(40, 40, 15);
   debugDiv = createDiv('hello');
@@ -328,9 +336,9 @@ function draw() {
       return;
     }
     if (mouseButton === LEFT) {
-      targetedTile.setContent(new Rock());
+      targetedTile.replaceContent(new Rock());
     } else {
-      targetedTile.setContent(new Water());
+      targetedTile.replaceContent(new Water());
     }
   }
 }
@@ -370,17 +378,22 @@ function keyPressed() {
 
   if (keyCode === 65) {
     // a
-    targetedTile.setContent(new Air());
+    targetedTile.replaceContent(new Air());
   }
 
   if (keyCode === 87) {
     // w
-    targetedTile.setContent(new Water());
+    targetedTile.replaceContent(new Water());
   }
 
   if (keyCode === 82) {
     // r
-    targetedTile.setContent(new Rock());
+    targetedTile.replaceContent(new Rock());
+  }
+
+  if (keyCode === 86) {
+    // r
+    targetedTile.replaceContent(new Vaccum());
   }
 }
 
@@ -389,112 +402,63 @@ document.oncontextmenu = function() {
 };
 
 function simulate(grid) {
-  // Calculate diff
-  const diff = {};
+  // Calculate airDiff
+  const airDiff = {};
 
   grid.iterateTiles(tile => {
+    const neighbours = grid.getNeighbourTiles(tile);
+    if (tile.content instanceof Water) {
+    }
+
     if (tile.content instanceof Air) {
-      const { top, right, bottom, left } = grid.getNeighbourTiles(tile);
+      flowAir(tile.content, airDiff, neighbours);
+    }
 
-      function flowable(t) {
-        return t && t.content.isAirFlowable();
+    if (tile.evictContent) {
+      _log('evicting...', tile.evictContent);
+      if (tile.evictContent instanceof Air) {
+        flowAir(tile.evictContent, airDiff, neighbours, true);
+      } else {
+        tile.evictContent = null;
       }
-
-      function flowToTile(forces) {
-        let lostMass = 0;
-
-        let totalForce = forces
-          .map(([_, force]) => force)
-          .reduce((sum, n) => sum + n, 0);
-
-        let totalMass = forces
-          .map(([t, _]) => t.content.mass)
-          .reduce((sum, n) => sum + n, 0);
-
-        // const maxMassGap = Math.max(
-        //   ...forces
-        //     .map(([destTile]) => tile.content.mass - destTile.content.mass)
-        //     .filter(_ => _ > 0)
-        // );
-
-        let averageMass = (tile.content.mass + totalMass) / (forces.length + 1);
-
-        let totalFlowMass = tile.content.mass - averageMass;
-
-        if (totalFlowMass <= 0) {
-          return;
-        }
-
-        forces.forEach(([destTile, force]) => {
-          flowMass = (totalFlowMass * force) / totalForce;
-
-          diff[destTile.i] = diff[destTile.i] || {};
-          diff[destTile.i][destTile.j] = diff[destTile.i][destTile.j] || 0;
-          diff[destTile.i][destTile.j] += flowMass;
-          lostMass += flowMass;
-        });
-
-        diff[tile.i] = diff[tile.i] || {};
-        diff[tile.i][tile.j] = diff[tile.i][tile.j] || 0;
-        diff[tile.i][tile.j] -= lostMass;
-      }
-
-      const forces = [];
-      let remaining = tile.content.mass;
-
-      [top, right, bottom, left].forEach(dest => {
-        if (flowable(dest)) {
-          let force = tile.content.mass / dest.content.mass;
-          if (force <= 1) {
-            return;
-          }
-
-          if (force > AIR_MAX_FORCE) {
-            force = AIR_MAX_FORCE;
-          }
-
-          forces.push([dest, 1 - force]);
-        }
-      });
-
-      if (forces.length) {
-        flowToTile(forces);
-      }
-
-      tile.content._debug = {
-        forces: forces.map(_ => _[1])
-      };
     }
   });
 
-  _log('diff', diff);
+  _log('airDiff', airDiff);
 
   // Mass check
   let totalMass = 0;
-  Object.keys(diff).forEach(i => {
-    Object.keys(diff[i]).forEach(j => {
-      totalMass += diff[i][j];
+  Object.keys(airDiff).forEach(i => {
+    Object.keys(airDiff[i]).forEach(j => {
+      totalMass += airDiff[i][j];
     });
   });
 
   if (Math.abs(totalMass) >= ERROR_RATE) {
-    throw Error('Incorrect diff! ' + totalMass);
+    throw Error('Incorrect airDiff! ' + totalMass);
   }
 
-  // Apply air diff
-  Object.keys(diff).forEach(i => {
-    Object.keys(diff[i]).forEach(j => {
-      const diffMass = diff[i][j];
+  // Apply air airDiff
+  Object.keys(airDiff).forEach(i => {
+    Object.keys(airDiff[i]).forEach(j => {
+      const diffMass = airDiff[i][j];
       const tile = grid.data[i][j];
 
       if (tile.content instanceof Air) {
         tile.content.mass += diffMass;
 
         if (tile.content.mass <= 0) {
+          // is it evicting previous air?
           tile.setContent(new Vaccum()); // should be vaccum
         }
       } else {
-        tile.setContent(new Air(diffMass));
+        if (tile.content.isAirFlowable()) {
+          tile.setContent(new Air(diffMass));
+        } else {
+          // probably caused by evicting air
+          _log('evict');
+          tile.evictContent = null;
+        }
       }
     });
   });
@@ -516,4 +480,76 @@ function mouseMoved() {
   debugDiv.html(
     '<pre>' + JSON.stringify(targetedTile.content.debug(), null, 2) + '</pre>'
   );
+}
+
+function flowAir(content, diff, { top, right, bottom, left }, evict = false) {
+  function flowToTile(forces) {
+    let lostMass = 0;
+
+    let totalForce = forces
+      .map(([_, force]) => force)
+      .reduce((sum, n) => sum + n, 0);
+
+    let totalMass = forces
+      .map(([t, _]) => t.content.mass)
+      .reduce((sum, n) => sum + n, 0);
+
+    let totalFlowMass;
+
+    if (evict) {
+      totalFlowMass = content.mass;
+    } else {
+      let averageMass = (content.mass + totalMass) / (forces.length + 1);
+
+      totalFlowMass = content.mass - averageMass;
+    }
+
+    if (totalFlowMass <= 0) {
+      return;
+    }
+
+    forces.forEach(([dest, force]) => {
+      flowMass = (totalFlowMass * force) / totalForce;
+
+      diff[dest.i] = diff[dest.i] || {};
+      diff[dest.i][dest.j] = diff[dest.i][dest.j] || 0;
+      diff[dest.i][dest.j] += flowMass;
+      lostMass += flowMass;
+    });
+
+    const currentTile = content.containerTile;
+
+    diff[currentTile.i] = diff[currentTile.i] || {};
+    diff[currentTile.i][currentTile.j] =
+      diff[currentTile.i][currentTile.j] || 0;
+    diff[currentTile.i][currentTile.j] -= lostMass;
+  }
+
+  const forces = [];
+
+  [top, right, bottom, left].forEach(dest => {
+    if (dest && dest.content.isAirFlowable()) {
+      let force = content.mass / dest.content.mass;
+
+      if (evict) {
+        force += 0.1;
+      }
+
+      if (force <= 1) {
+        return;
+      }
+
+      if (force > AIR_MAX_FORCE) {
+        force = AIR_MAX_FORCE;
+      }
+
+      forces.push([dest, 1 - force]);
+    }
+  });
+
+  _log('forces', forces, top, right, bottom, left);
+
+  if (forces.length) {
+    flowToTile(forces);
+  }
 }
