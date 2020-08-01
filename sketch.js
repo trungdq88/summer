@@ -1,10 +1,23 @@
-const MAX_WATER_PRESSURE = 5;
-const MIN_WATER_PRESSURE = 1;
-const WATER_SURFACE_TENSION = 1;
+const MAX_WATER_PRESSURE = 500000;
+const MIN_WATER_PRESSURE = 500;
+const WATER_AIR_PRESSURE_RATIO = 770;
 const ERROR_RATE = 0.0000001;
+const FLOW_MASS_PER_FRAME = 50;
+const GRAVITY_FORCE = 5;
+
+const PRESSURE_RATIOS = {
+  air: {
+    air: 1,
+    water: 1.3 / 1000
+  },
+  water: {
+    air: 1000 / 1.3,
+    water: 1
+  }
+};
 
 function _log(...args) {
-  // console.log(...args);
+  console.log(...args);
 }
 
 class Grid {
@@ -52,7 +65,11 @@ class Grid {
   tileAt(x, y) {
     const i = Math.floor(x / this.tileSize);
     const j = Math.floor(y / this.tileSize);
-    this.throwBoundary(i, j);
+    try {
+      this.throwBoundary(i, j);
+    } catch (e) {
+      return undefined;
+    }
     return this.data[i][j];
   }
 
@@ -109,15 +126,20 @@ class Content {
   setContainerTile(tile) {
     this.containerTile = tile;
   }
+
+  debug() {
+    return {};
+  }
 }
 
 class Air extends Content {
   constructor() {
     super();
-    this.mass = 1;
+    this.name = 'air';
+    this.mass = 1.3;
   }
 
-  isLiquidFlowable() {
+  isFlowable() {
     return true;
   }
 
@@ -134,17 +156,34 @@ class Air extends Content {
       this.containerTile.size,
       this.containerTile.size
     );
+    fill('gray');
+    text(
+      Math.floor(this.mass * 100) / 100,
+      this.containerTile.i * this.containerTile.size,
+      this.containerTile.j * this.containerTile.size +
+        this.containerTile.size / 3
+    );
     pop();
+  }
+
+  debug() {
+    return {
+      class: 'Air',
+      position: [this.containerTile.i, this.containerTile.j],
+      mass: this.mass,
+      debug: this._debug
+    };
   }
 }
 
 class Water extends Content {
   constructor(mass) {
     super();
-    this.mass = mass;
+    this.name = 'water';
+    this.mass = mass || 1000;
   }
 
-  isLiquidFlowable() {
+  isFlowable() {
     return true;
   }
 
@@ -154,14 +193,37 @@ class Water extends Content {
 
   draw() {
     push();
-    fill(color(0, 126, 255, (255 * this.mass) / MAX_WATER_PRESSURE));
+    let p = (1 - this.mass / 5000) * 100;
+    if (p < 15) {
+      p = 25;
+    }
+    if (p > 90) {
+      p = 90;
+    }
+    fill(color(`hsl(208, 98%, ${p}%)`));
     rect(
       this.containerTile.i * this.containerTile.size,
       this.containerTile.j * this.containerTile.size,
       this.containerTile.size,
       this.containerTile.size
     );
+    fill('gray');
+    text(
+      Math.floor(this.mass * 100) / 100,
+      this.containerTile.i * this.containerTile.size,
+      this.containerTile.j * this.containerTile.size +
+        this.containerTile.size / 3
+    );
     pop();
+  }
+
+  debug() {
+    return {
+      class: 'Water',
+      mass: this.mass,
+      position: [this.containerTile.i, this.containerTile.j],
+      debug: this._debug
+    };
   }
 }
 
@@ -175,7 +237,7 @@ class Rock extends Content {
     return true;
   }
 
-  isLiquidFlowable() {
+  isFlowable() {
     return false;
   }
 
@@ -195,10 +257,12 @@ class Rock extends Content {
 let grid;
 let simulating = false;
 let isPainting = false;
+let debugDiv;
 
 function setup() {
   createCanvas(600, 600);
   grid = new Grid(20, 20, 30);
+  debugDiv = createDiv('hello');
 }
 
 function draw() {
@@ -208,10 +272,13 @@ function draw() {
 
   if (isPainting) {
     const targetedTile = grid.tileAt(mouseX, mouseY);
+    if (!targetedTile) {
+      return;
+    }
     if (mouseButton === LEFT) {
-      targetedTile.setContent(new Rock(1));
+      targetedTile.setContent(new Rock());
     } else {
-      targetedTile.setContent(new Water(3));
+      targetedTile.setContent(new Water());
     }
   }
 }
@@ -236,6 +303,22 @@ function keyPressed() {
     // space
     simulating = !simulating;
   }
+
+  if (keyCode === 65) {
+    // a
+    const targetedTile = grid.tileAt(mouseX, mouseY);
+    if (targetedTile.content instanceof Water) {
+      targetedTile.content.mass += 1000;
+    }
+  }
+
+  if (keyCode === 66) {
+    // b
+    const targetedTile = grid.tileAt(mouseX, mouseY);
+    if (targetedTile.content instanceof Water) {
+      targetedTile.content.mass -= 50;
+    }
+  }
 }
 
 document.oncontextmenu = function() {
@@ -247,110 +330,96 @@ function simulate(grid) {
   const diff = {};
 
   grid.iterateTiles(tile => {
-    if (tile.content instanceof Water) {
-      const { top, right, bottom, left } = grid.getNeighbourTiles(tile);
+    if (!(tile.content instanceof Water) && !(tile.content instanceof Air)) {
+      return;
+    }
 
-      let remaining = tile.content.mass;
+    const { top, right, bottom, left } = grid.getNeighbourTiles(tile);
 
-      function flowable(t) {
-        return t && t.content.isLiquidFlowable() && !t.content.isOverPressure();
-      }
+    let remaining = tile.content.mass;
 
-      // Flow to a neighbor tile
-      function flowToTile(forces) {
-        // "Flow" is actually the process to balance the pressure between tiles
-        // Which means the mass of water should be distributed to all of it's
-        // neighbor flowable tiles.
-        let totalForce = forces
-          .map(([_, force]) => force)
-          .reduce((sum, n) => sum + n, 0);
+    function flowable(t) {
+      return t && t.content.isFlowable();
+    }
 
-        let lostMass = 0;
+    const _flowMass = [];
 
-        let balanceMass =
-          (forces
-            .map(([targetTile, force]) => targetTile.content.mass)
-            .reduce((sum, n) => sum + n, 0) +
-            tile.content.mass) /
-          (1 + forces.length);
+    function flowToTile(forces) {
+      let lostMass = 0;
 
-        let bonusTile;
+      let totalForce = forces
+        .map(([_, force]) => force)
+        .reduce((sum, n) => sum + n, 0);
 
-        forces.forEach(([targetTile, force]) => {
-          if (
-            !(targetTile.content instanceof Water) &&
-            force <= WATER_SURFACE_TENSION
-          ) {
-            return;
-          }
+      // const maxMassGap = Math.max(
+      //   ...forces
+      //     .map(([destTile]) => tile.content.mass - destTile.content.mass)
+      //     .filter(_ => _ > 0)
+      // );
 
-          const flowMass = Math.min(
-            tile.content.mass,
-            (balanceMass * force) / totalForce
-          );
-          _log('content.mass:', tile.content.mass, 'flowMass', flowMass);
-          balanceMass -= flowMass;
-          lostMass += flowMass;
+      const totalFlowMass = Math.min(tile.content.mass, FLOW_MASS_PER_FRAME);
 
-          diff[targetTile.i] = diff[targetTile.i] || {};
-          diff[targetTile.i][targetTile.j] =
-            diff[targetTile.i][targetTile.j] || 0;
-          diff[targetTile.i][targetTile.j] += flowMass;
-
-          if (flowMass > 0) {
-            bonusTile = targetTile;
-          }
-        });
-
-        const drip = tile.content.mass - lostMass;
-        if (drip <= MIN_WATER_PRESSURE) {
-          // console.log('remove last drip');
-          lostMass = tile.content.mass;
-          // just push the remaining to the first tile to reserve mass
-          diff[bonusTile.i][bonusTile.j] += drip;
-        }
-
-        diff[tile.i] = diff[tile.i] || {};
-        diff[tile.i][tile.j] = diff[tile.i][tile.j] || 0;
-        diff[tile.i][tile.j] -= lostMass;
-      }
-
-      // _log('tile', tile.content.mass, 'bottom', bottom.content.mass);
-      // Pressure balance using average
-      const forces = [
-        [
-          bottom,
-          flowable(bottom)
-            ? 5 + (tile.content.mass - bottom.content.mass) / 2
-            : 0
-        ],
-        [top, flowable(top) ? (tile.content.mass - top.content.mass) / 2 : 0],
-        [
-          left,
-          flowable(left) ? (tile.content.mass - left.content.mass) / 2 : 0
-        ],
-        [
-          right,
-          flowable(right) ? (tile.content.mass - right.content.mass) / 2 : 0
-        ]
-      ].filter(([_, force]) => force > 0);
-      _log('forces for ', tile.i, tile.j, forces);
-
-      if (forces.length === 0) {
-        // no where to flow
+      if (totalFlowMass < 0) {
         return;
       }
 
+      forces.forEach(([destTile, force]) => {
+        // TODO: flowMass negative should be possible?
+        flowMass = (totalFlowMass * force) / totalForce;
+        _flowMass.push(flowMass);
+
+        diff[destTile.i] = diff[destTile.i] || {};
+        diff[destTile.i][destTile.j] = diff[destTile.i][destTile.j] || 0;
+        diff[destTile.i][destTile.j] += flowMass;
+        lostMass += flowMass;
+      });
+
+      diff[tile.i] = diff[tile.i] || {};
+      diff[tile.i][tile.j] = diff[tile.i][tile.j] || 0;
+      diff[tile.i][tile.j] -= lostMass;
+    }
+
+    const forces = [];
+
+    [top, right, bottom, left].forEach(dest => {
+      if (flowable(dest)) {
+        let pressure = tile.content.mass / dest.content.mass;
+        // console.log(
+        //   'pressure',
+        //   pressure,
+        //   'desired',
+        //   PRESSURE_RATIOS[tile.content.name][dest.content.name]
+        // );
+
+        const ratio =
+          pressure / PRESSURE_RATIOS[tile.content.name][dest.content.name];
+
+        // console.log('ratio', ratio);
+
+        // //gravity
+        // if (dest.i === tile.i && dest.j === tile.j + 1) {
+        //   force *= GRAVITY_FORCE;
+        // }
+        // if (dest.i === tile.i && dest.j === tile.j - 1) {
+        //   force /= GRAVITY_FORCE;
+        // }
+
+        if (ratio > 1) {
+          forces.push([dest, ratio]);
+        }
+      }
+    });
+
+    if (forces.length) {
       flowToTile(forces);
     }
+
+    tile.content._debug = {
+      forces: forces.map(_ => _[1]),
+      _flowMass
+    };
   });
 
-  // _log(
-  //   'mass before',
-  //   tile.content.mass,
-  //   forces.map(_ => _[0].content.mass)
-  // );
-  //
   _log('diff', diff);
 
   // Mass check
@@ -384,12 +453,20 @@ function simulate(grid) {
   });
 
   // Mass check
-  let mass = 0;
+  let massDict = {};
   grid.iterateTiles(tile => {
-    if (tile.content instanceof Water) {
-      _log('+', tile.content.mass);
-      mass += tile.content.mass;
-    }
+    massDict[tile.content.name] = massDict[tile.content.name] || 0;
+    massDict[tile.content.name] += tile.content.mass;
   });
-  _log('mass', mass);
+  _log('mass', massDict);
+}
+
+function mouseMoved() {
+  const targetedTile = grid.tileAt(mouseX, mouseY);
+  if (!targetedTile) {
+    return;
+  }
+  debugDiv.html(
+    '<pre>' + JSON.stringify(targetedTile.content.debug(), null, 2) + '</pre>'
+  );
 }
