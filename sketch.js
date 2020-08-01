@@ -3,7 +3,6 @@ const MIN_WATER_PRESSURE = 500;
 const WATER_AIR_PRESSURE_RATIO = 770;
 const ERROR_RATE = 0.00001;
 const GRAVITY_FORCE = 5;
-const AIR_FLOW_SPEED = 0.5;
 const AIR_FRICION = 1.5;
 const AIR_MAX_FORCE = 10;
 
@@ -22,7 +21,7 @@ class Grid {
     for (let i = 0; i < width; i++) {
       let line = [];
       for (let j = 0; j < height; j++) {
-        line.push(new Tile(i, j, new Air(), tileSize));
+        line.push(new Tile(i, j, new Vaccum(), tileSize));
       }
       this.data.push(line);
     }
@@ -149,11 +148,11 @@ class Air extends Content {
   draw() {
     push();
     let p = ((this.mass + 0.2) * 100) / 20;
-    if (p > 90) {
-      p = 90;
+    if (p > 85) {
+      p = 85;
     }
-    if (p < 10) {
-      p = 10;
+    if (p < 5) {
+      p = 5;
     }
     fill(color(`hsl(0, 0%, ${100 - p}%)`));
     rect(
@@ -314,6 +313,7 @@ let debugDiv;
 function setup() {
   createCanvas(600, 600);
   grid = new Grid(20, 20, 30);
+  // grid = new Grid(40, 40, 15);
   debugDiv = createDiv('hello');
 }
 
@@ -356,16 +356,31 @@ function keyPressed() {
     simulating = !simulating;
   }
 
-  if (keyCode === 65) {
-    // a
-    const targetedTile = grid.tileAt(mouseX, mouseY);
+  const targetedTile = grid.tileAt(mouseX, mouseY);
+
+  if (keyCode === 38) {
+    // up
     targetedTile.content.mass *= 2;
   }
 
-  if (keyCode === 66) {
-    // b
-    const targetedTile = grid.tileAt(mouseX, mouseY);
+  if (keyCode === 40) {
+    // down
     targetedTile.content.mass /= 2;
+  }
+
+  if (keyCode === 65) {
+    // a
+    targetedTile.setContent(new Air());
+  }
+
+  if (keyCode === 87) {
+    // w
+    targetedTile.setContent(new Water());
+  }
+
+  if (keyCode === 82) {
+    // r
+    targetedTile.setContent(new Rock());
   }
 }
 
@@ -405,9 +420,6 @@ function simulate(grid) {
         let averageMass = (tile.content.mass + totalMass) / (forces.length + 1);
 
         let totalFlowMass = tile.content.mass - averageMass;
-
-        // let totalFlowMass =
-        //   (tile.content.mass * AIR_FLOW_SPEED) / forces.length;
 
         if (totalFlowMass <= 0) {
           return;
