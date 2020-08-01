@@ -1,10 +1,12 @@
-const MAX_WATER_PRESSURE = 500000;
+const MAX_WATER_MASS = 1000;
 const MIN_WATER_PRESSURE = 500;
-const WATER_AIR_PRESSURE_RATIO = 770;
-const ERROR_RATE = 0.00001;
+const MIN_WATER = 50;
+const ERROR_RATE = 0.01;
 const GRAVITY_FORCE = 5;
 const AIR_FRICION = 1.5;
 const AIR_MAX_FORCE = 10;
+const WATER_PRESSURE = 1.02;
+const WATER_FLOW_SPEED = 0.5;
 
 function _log(...args) {
   // console.log(...args);
@@ -21,7 +23,7 @@ class Grid {
     for (let i = 0; i < width; i++) {
       let line = [];
       for (let j = 0; j < height; j++) {
-        line.push(new Tile(i, j, new Vaccum(), tileSize));
+        line.push(new Tile(this, i, j, new Vaccum(), tileSize));
       }
       this.data.push(line);
     }
@@ -90,13 +92,14 @@ class Grid {
 }
 
 class Tile {
-  constructor(i, j, content, size) {
+  constructor(containerGrid, i, j, content, size) {
     this.i = i;
     this.j = j;
     this.content = content;
     this.size = size;
     this.content.setContainerTile(this);
     this.evictContent = null;
+    this.containerGrid = containerGrid;
   }
 
   setContent(content) {
@@ -115,6 +118,10 @@ class Tile {
     this.evictContent = this.content;
     this.content = newContent;
     this.content.setContainerTile(this);
+  }
+
+  getTop() {
+    return this.containerGrid.getNeighbourTiles(this).top;
   }
 }
 
@@ -139,7 +146,7 @@ class Air extends Content {
     this.mass = mass || 1.3;
   }
 
-  isFlowable() {
+  isWaterFlowable() {
     return true;
   }
 
@@ -154,12 +161,7 @@ class Air extends Content {
   draw() {
     push();
     let p = ((this.mass + 0.2) * 100) / 20;
-    if (p > 85) {
-      p = 85;
-    }
-    if (p < 5) {
-      p = 5;
-    }
+    p = constrain(p, 5, 85);
     fill(color(`hsl(0, 0%, ${100 - p}%)`));
     rect(
       this.containerTile.i * this.containerTile.size,
@@ -194,7 +196,7 @@ class Vaccum extends Content {
     this.mass = 0;
   }
 
-  isFlowable() {
+  isWaterFlowable() {
     return true;
   }
 
@@ -231,7 +233,7 @@ class Water extends Content {
     this.mass = mass || 1000;
   }
 
-  isFlowable() {
+  isWaterFlowable() {
     return true;
   }
 
@@ -240,26 +242,44 @@ class Water extends Content {
   }
 
   isOverPressure() {
-    return this.mass >= MAX_WATER_PRESSURE;
+    return this.mass >= MAX_WATER_MASS;
   }
 
   draw() {
     push();
-    let p = (1 - this.mass / 5000) * 100;
-    if (p < 15) {
-      p = 25;
-    }
-    if (p > 90) {
-      p = 90;
-    }
-    fill(color(`hsl(208, 98%, ${p}%)`));
+    let p = (1 - this.mass / 1800) * 100;
+    p = constrain(p, 10, 60);
+    fill('white');
     rect(
       this.containerTile.i * this.containerTile.size,
       this.containerTile.j * this.containerTile.size,
       this.containerTile.size,
       this.containerTile.size
     );
-    fill('gray');
+    fill(color(`hsl(208, 98%, ${p}%)`));
+
+    if (
+      this.containerTile.getTop() &&
+      this.containerTile.getTop().content.name === 'water'
+    ) {
+      rect(
+        this.containerTile.i * this.containerTile.size,
+        this.containerTile.j * this.containerTile.size,
+        this.containerTile.size,
+        this.containerTile.size
+      );
+    } else {
+      rect(
+        this.containerTile.i * this.containerTile.size,
+        this.containerTile.j * this.containerTile.size +
+          this.containerTile.size *
+            (1 - Math.min(1, this.mass / MAX_WATER_MASS)),
+        this.containerTile.size,
+        this.containerTile.size * Math.min(1, this.mass / MAX_WATER_MASS)
+      );
+    }
+
+    fill('black');
     text(
       Math.floor(this.mass * 10) / 10,
       this.containerTile.i * this.containerTile.size,
@@ -290,7 +310,7 @@ class Rock extends Content {
     return true;
   }
 
-  isFlowable() {
+  isWaterFlowable() {
     return false;
   }
 
@@ -326,7 +346,6 @@ function setup() {
 }
 
 function draw() {
-  background(128);
   noStroke();
   grid.draw();
 
@@ -404,10 +423,12 @@ document.oncontextmenu = function() {
 function simulate(grid) {
   // Calculate airDiff
   const airDiff = {};
+  const waterDiff = {};
 
   grid.iterateTiles(tile => {
     const neighbours = grid.getNeighbourTiles(tile);
     if (tile.content instanceof Water) {
+      flowWater(tile.content, waterDiff, neighbours);
     }
 
     if (tile.content instanceof Air) {
@@ -418,6 +439,8 @@ function simulate(grid) {
       _log('evicting...', tile.evictContent);
       if (tile.evictContent instanceof Air) {
         flowAir(tile.evictContent, airDiff, neighbours, true);
+      } else if (tile.evictContent instanceof Water) {
+        flowWater(tile.evictContent, waterDiff, neighbours, true);
       } else {
         tile.evictContent = null;
       }
@@ -425,6 +448,7 @@ function simulate(grid) {
   });
 
   _log('airDiff', airDiff);
+  _log('waterDiff', waterDiff);
 
   // Mass check
   let totalMass = 0;
@@ -448,14 +472,42 @@ function simulate(grid) {
         tile.content.mass += diffMass;
 
         if (tile.content.mass <= 0) {
-          // is it evicting previous air?
-          tile.setContent(new Vaccum()); // should be vaccum
+          tile.setContent(new Vaccum());
         }
       } else {
         if (tile.content.isAirFlowable()) {
           tile.setContent(new Air(diffMass));
         } else {
           // probably caused by evicting air
+          _log('evict');
+          tile.evictContent = null;
+        }
+      }
+    });
+  });
+
+  Object.keys(waterDiff).forEach(i => {
+    Object.keys(waterDiff[i]).forEach(j => {
+      const diffMass = waterDiff[i][j];
+      const tile = grid.data[i][j];
+
+      if (tile.content instanceof Water) {
+        tile.content.mass += diffMass;
+
+        if (tile.content.mass <= 0) {
+          if (tile.evictContent) {
+            // swap
+            tile.setContent(tile.evictContent);
+            tile.evictContent = null;
+          } else {
+            tile.setContent(new Vaccum());
+          }
+        }
+      } else {
+        if (tile.content.isWaterFlowable()) {
+          tile.replaceContent(new Water(diffMass));
+        } else {
+          // probably caused by evicting water
           _log('evict');
           tile.evictContent = null;
         }
@@ -510,19 +562,12 @@ function flowAir(content, diff, { top, right, bottom, left }, evict = false) {
 
     forces.forEach(([dest, force]) => {
       flowMass = (totalFlowMass * force) / totalForce;
-
-      diff[dest.i] = diff[dest.i] || {};
-      diff[dest.i][dest.j] = diff[dest.i][dest.j] || 0;
-      diff[dest.i][dest.j] += flowMass;
+      addMass(diff, dest.i, dest.j, flowMass);
       lostMass += flowMass;
     });
 
     const currentTile = content.containerTile;
-
-    diff[currentTile.i] = diff[currentTile.i] || {};
-    diff[currentTile.i][currentTile.j] =
-      diff[currentTile.i][currentTile.j] || 0;
-    diff[currentTile.i][currentTile.j] -= lostMass;
+    addMass(diff, currentTile.i, currentTile.j, -lostMass);
   }
 
   const forces = [];
@@ -551,5 +596,134 @@ function flowAir(content, diff, { top, right, bottom, left }, evict = false) {
 
   if (forces.length) {
     flowToTile(forces);
+  }
+}
+
+function flowWater(content, diff, { top, right, bottom, left }, evict = false) {
+  let remaining = content.mass;
+  let lostMass = 0;
+
+  function flows() {
+    if (remaining <= 0) return;
+
+    if (bottom && bottom.content.isWaterFlowable()) {
+      let bottomWaterMass = 0;
+
+      if (bottom.content.name === 'water') {
+        bottomWaterMass = bottom.content.mass;
+      }
+
+      const desiredBottomMass = calculateBottomMass(
+        bottomWaterMass + remaining
+      );
+      let flowMass = Math.min(remaining, desiredBottomMass - bottomWaterMass);
+      if (remaining - flowMass <= ERROR_RATE) {
+        flowMass = remaining;
+      }
+      if (flowMass > 0) {
+        _log('flow down', flowMass, 'desired', desiredBottomMass);
+
+        addMass(diff, bottom.i, bottom.j, flowMass);
+        lostMass += flowMass;
+        remaining -= flowMass;
+      }
+    }
+
+    if (remaining <= MIN_WATER) return;
+
+    if (left && left.content.isWaterFlowable()) {
+      let waterMass = 0;
+
+      if (left.content.name === 'water') {
+        waterMass = left.content.mass;
+      }
+
+      if (remaining > waterMass) {
+        let flowMass = (remaining - waterMass) / 4;
+        if (remaining - flowMass <= ERROR_RATE) {
+          flowMass = remaining;
+        }
+        addMass(diff, left.i, left.j, flowMass);
+        lostMass += flowMass;
+        remaining -= flowMass;
+      }
+    }
+
+    if (remaining <= MIN_WATER) return;
+
+    if (right && right.content.isWaterFlowable()) {
+      let waterMass = 0;
+
+      if (right.content.name === 'water') {
+        waterMass = right.content.mass;
+      }
+
+      if (remaining > waterMass) {
+        let flowMass = (remaining - waterMass) / 4;
+        if (remaining - flowMass <= ERROR_RATE) {
+          flowMass = remaining;
+        }
+        addMass(diff, right.i, right.j, flowMass);
+        lostMass += flowMass;
+        remaining -= flowMass;
+      }
+    }
+
+    if (remaining <= MIN_WATER) return;
+
+    if (top && top.content.isWaterFlowable()) {
+      if (remaining <= MAX_WATER_MASS) return;
+      let waterMass = 0;
+
+      if (top.content.name === 'water') {
+        waterMass = top.content.mass;
+      }
+
+      const desiredBottomMass = calculateBottomMass(waterMass + remaining);
+      let flowMass = Math.min(remaining, remaining - desiredBottomMass);
+      if (remaining - flowMass <= ERROR_RATE) {
+        flowMass = remaining;
+      }
+      if (flowMass > 0) {
+        _log('flow up', flowMass, 'desired', desiredBottomMass);
+
+        addMass(diff, top.i, top.j, flowMass);
+        lostMass += flowMass;
+        remaining -= flowMass;
+      }
+    }
+  }
+
+  flows();
+
+  const currentTile = content.containerTile;
+  addMass(diff, currentTile.i, currentTile.j, -lostMass);
+}
+
+function addMass(diff, i, j, mass) {
+  diff[i] = diff[i] || {};
+  diff[i][j] = diff[i][j] || 0;
+  diff[i][j] += mass;
+}
+
+// Three cases to cover:
+// 1. Total is less than MAX_WATER_MASS: put all the water to bottom
+// 2. Too many water that can fill both bottom & up at MAX_WATER_MASS: figure out the bottom one using a simple fomula
+// 3. Total water is enough to fill MAX_WATER_MASS and still left a bit (< MAX_WATER_MASS) for the top: recalculate the pressure ratio
+function calculateBottomMass(total) {
+  _log('total', total);
+  if (total <= MAX_WATER_MASS) {
+    // Case 1
+    return total;
+  } else if (total >= 2 * MAX_WATER_MASS) {
+    // Case 2
+    // Let x is the amount of water in the top cell.
+    // x + WATER_PRESSURE * x = total
+    //
+    // The return bellow return the value of (WATER_PRESSURE * x)
+    return (WATER_PRESSURE * total) / (WATER_PRESSURE + 1);
+  } else {
+    // Case 3
+    return MAX_WATER_MASS * WATER_PRESSURE;
   }
 }
