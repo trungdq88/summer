@@ -5,7 +5,7 @@ const ERROR_RATE = 0.01;
 const GRAVITY_FORCE = 5;
 const AIR_FRICION = 1.5;
 const AIR_MAX_FORCE = 10;
-const WATER_PRESSURE = 1.02;
+const WATER_PRESSURE = 1.05;
 const WATER_FLOW_SPEED = 0.5;
 
 function _log(...args) {
@@ -639,7 +639,7 @@ function flowWater(content, diff, { top, right, bottom, left }, evict = false) {
       }
 
       if (remaining > waterMass) {
-        let flowMass = (remaining - waterMass) / 4;
+        let flowMass = (remaining - waterMass) / 3;
         if (remaining - flowMass <= ERROR_RATE) {
           flowMass = remaining;
         }
@@ -659,7 +659,7 @@ function flowWater(content, diff, { top, right, bottom, left }, evict = false) {
       }
 
       if (remaining > waterMass) {
-        let flowMass = (remaining - waterMass) / 4;
+        let flowMass = (remaining - waterMass) / 3;
         if (remaining - flowMass <= ERROR_RATE) {
           flowMass = remaining;
         }
