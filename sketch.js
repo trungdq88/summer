@@ -5,7 +5,7 @@ const ERROR_RATE = 0.01;
 const GRAVITY_FORCE = 5;
 const AIR_FRICION = 1.5;
 const AIR_MAX_FORCE = 10;
-const WATER_PRESSURE = 1.05;
+const WATER_PRESSURE = 1.01;
 const WATER_FLOW_SPEED = 0.5;
 
 function _log(...args) {
@@ -35,6 +35,13 @@ class Grid {
     this.iterateTiles(tile => {
       tile.draw();
     });
+
+    push();
+    let fps = frameRate();
+    fill(255);
+    stroke(0);
+    text('FPS: ' + fps.toFixed(2), 10, height - 10);
+    pop();
   }
 
   iterateTiles(fn) {
@@ -140,10 +147,10 @@ class Content {
 }
 
 class Air extends Content {
-  constructor(mass) {
+  constructor(mass = 1.3) {
     super();
     this.name = 'air';
-    this.mass = mass || 1.3;
+    this.mass = mass;
   }
 
   isWaterFlowable() {
@@ -227,10 +234,10 @@ class Vaccum extends Content {
 }
 
 class Water extends Content {
-  constructor(mass) {
+  constructor(mass = 1000) {
     super();
     this.name = 'water';
-    this.mass = mass || 1000;
+    this.mass = mass;
   }
 
   isWaterFlowable() {
@@ -300,10 +307,10 @@ class Water extends Content {
 }
 
 class Rock extends Content {
-  constructor(mass) {
+  constructor(mass = 1) {
     super();
     this.name = 'rock';
-    this.mass = mass || 1;
+    this.mass = mass;
   }
 
   isOverPressure() {
@@ -343,6 +350,7 @@ function setup() {
   grid = new Grid(20, 20, 30);
   // grid = new Grid(40, 40, 15);
   debugDiv = createDiv('hello');
+  massCheckDiv = createDiv('hello');
 }
 
 function draw() {
@@ -414,6 +422,11 @@ function keyPressed() {
     // r
     targetedTile.replaceContent(new Vaccum());
   }
+
+  if (keyCode === 77) {
+    // m
+    massCheck();
+  }
 }
 
 document.oncontextmenu = function() {
@@ -428,7 +441,9 @@ function simulate(grid) {
   grid.iterateTiles(tile => {
     const neighbours = grid.getNeighbourTiles(tile);
     if (tile.content instanceof Water) {
+      _log('diff before flow water', JSON.stringify(waterDiff, null, 2));
       flowWater(tile.content, waterDiff, neighbours);
+      _log('diff after flow water', JSON.stringify(waterDiff, null, 2));
     }
 
     if (tile.content instanceof Air) {
@@ -440,7 +455,9 @@ function simulate(grid) {
       if (tile.evictContent instanceof Air) {
         flowAir(tile.evictContent, airDiff, neighbours, true);
       } else if (tile.evictContent instanceof Water) {
+        _log('diff before evict water', JSON.stringify(waterDiff, null, 2));
         flowWater(tile.evictContent, waterDiff, neighbours, true);
+        _log('diff after evict water', JSON.stringify(waterDiff, null, 2));
       } else {
         tile.evictContent = null;
       }
@@ -450,7 +467,7 @@ function simulate(grid) {
   _log('airDiff', airDiff);
   _log('waterDiff', waterDiff);
 
-  // Mass check
+  // Diff check
   let totalMass = 0;
   Object.keys(airDiff).forEach(i => {
     Object.keys(airDiff[i]).forEach(j => {
@@ -462,7 +479,18 @@ function simulate(grid) {
     throw Error('Incorrect airDiff! ' + totalMass);
   }
 
-  // Apply air airDiff
+  totalMass = 0;
+  Object.keys(waterDiff).forEach(i => {
+    Object.keys(waterDiff[i]).forEach(j => {
+      totalMass += waterDiff[i][j];
+    });
+  });
+
+  if (Math.abs(totalMass) >= ERROR_RATE) {
+    throw Error('Incorrect waterDiff! ' + totalMass);
+  }
+
+  // Apply airDiff
   Object.keys(airDiff).forEach(i => {
     Object.keys(airDiff[i]).forEach(j => {
       const diffMass = airDiff[i][j];
@@ -476,10 +504,19 @@ function simulate(grid) {
         }
       } else {
         if (tile.content.isAirFlowable()) {
-          tile.setContent(new Air(diffMass));
+          // check if there is any evicting air left in the tile.
+          if (tile.evictContent && tile.evictContent.name === 'air') {
+            const newMass = diffMass + tile.evictContent.mass;
+            tile.replaceContent(new Air(newMass));
+            // the evict content is now evicted to this same tile
+            tile.evictContent = null;
+          } else {
+            // put air in the tile, this will evict the previous content of the tile
+            tile.setContent(new Air(diffMass));
+          }
         } else {
           // probably caused by evicting air
-          _log('evict');
+          _log('earasing air mass: ', tile.evictContent);
           tile.evictContent = null;
         }
       }
@@ -505,23 +542,31 @@ function simulate(grid) {
         }
       } else {
         if (tile.content.isWaterFlowable()) {
-          tile.replaceContent(new Water(diffMass));
+          // check if there is any evicting water left in the tile.
+          if (tile.evictContent && tile.evictContent.name === 'water') {
+            // Merge the evicting water with the diff water to fill the tile
+            // with water again.
+            // This happen when the water is reqested to evict the tile but then
+            // there are water in other tiles pour in in the same iteration.
+            const newMass = diffMass + tile.evictContent.mass;
+            tile.replaceContent(new Water(newMass));
+            // the evict content is now evicted to this same tile
+            tile.evictContent = null;
+          } else {
+            // if no thing to evict, we can now replace the tile with water
+            // this will also evict the current content in the tile.
+            tile.replaceContent(new Water(diffMass));
+          }
         } else {
           // probably caused by evicting water
-          _log('evict');
+          _log('earasing water mass: ', tile.evictContent);
           tile.evictContent = null;
         }
       }
     });
   });
 
-  // Mass check
-  let massDict = {};
-  grid.iterateTiles(tile => {
-    massDict[tile.content.name] = massDict[tile.content.name] || 0;
-    massDict[tile.content.name] += tile.content.mass;
-  });
-  _log('mass', massDict);
+  massCheck();
 }
 
 function mouseMoved() {
@@ -529,9 +574,11 @@ function mouseMoved() {
   if (!targetedTile) {
     return;
   }
-  debugDiv.html(
-    '<pre>' + JSON.stringify(targetedTile.content.debug(), null, 2) + '</pre>'
-  );
+  showDebug(debugDiv, targetedTile.content.debug());
+}
+
+function showDebug(div, obj) {
+  div.html('<pre>' + JSON.stringify(obj, null, 2) + '</pre>');
 }
 
 function flowAir(content, diff, { top, right, bottom, left }, evict = false) {
@@ -603,7 +650,24 @@ function flowWater(content, diff, { top, right, bottom, left }, evict = false) {
   let remaining = content.mass;
   let lostMass = 0;
 
+  // Evict the all water in the current tile because another content is
+  // replacing the tile.
+  function evictWater() {
+    _log('flowWater/evict', content);
+    // Let water exit at all direction equally, seem to be an ok strategy
+    const directions = [top, right, bottom, left].filter(
+      direction => direction && direction.content.isWaterFlowable()
+    );
+    const flowMass = remaining / directions.length;
+    directions.forEach(direction => {
+      addMass(diff, direction.i, direction.j, flowMass);
+      lostMass += flowMass;
+    });
+  }
+
+  // Let the water flow "naturally"
   function flows() {
+    _log('flowWater/flow', content);
     if (remaining <= 0) return;
 
     if (bottom && bottom.content.isWaterFlowable()) {
@@ -637,6 +701,8 @@ function flowWater(content, diff, { top, right, bottom, left }, evict = false) {
       if (left.content.name === 'water') {
         waterMass = left.content.mass;
       }
+
+      _log('flow left', left.content.mass, left.content.name);
 
       if (remaining > waterMass) {
         let flowMass = (remaining - waterMass) / 3;
@@ -685,8 +751,6 @@ function flowWater(content, diff, { top, right, bottom, left }, evict = false) {
         flowMass = remaining;
       }
       if (flowMass > 0) {
-        _log('flow up', flowMass, 'desired', desiredBottomMass);
-
         addMass(diff, top.i, top.j, flowMass);
         lostMass += flowMass;
         remaining -= flowMass;
@@ -694,7 +758,11 @@ function flowWater(content, diff, { top, right, bottom, left }, evict = false) {
     }
   }
 
-  flows();
+  if (evict) {
+    evictWater();
+  } else {
+    flows();
+  }
 
   const currentTile = content.containerTile;
   addMass(diff, currentTile.i, currentTile.j, -lostMass);
@@ -726,4 +794,27 @@ function calculateBottomMass(total) {
     // Case 3
     return MAX_WATER_MASS * WATER_PRESSURE;
   }
+}
+
+function massCheck() {
+  // Mass check
+  let massDict = {};
+  let evictDict = {};
+
+  grid.iterateTiles(tile => {
+    massDict[tile.content.name] = massDict[tile.content.name] || 0;
+    massDict[tile.content.name] += tile.content.mass;
+    if (tile.evictContent) {
+      evictDict[tile.evictContent.name] =
+        evictDict[tile.evictContent.name] || 0;
+      evictDict[tile.evictContent.name] = tile.evictContent.mass;
+    }
+  });
+  for (key in massDict) {
+    massDict[key] = Math.round(massDict[key] * 100) / 100;
+  }
+  for (key in evictDict) {
+    evictDict[key] = Math.round(evictDict[key] * 100) / 100;
+  }
+  showDebug(massCheckDiv, { evictDict, massDict });
 }
