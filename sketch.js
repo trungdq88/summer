@@ -1,12 +1,13 @@
 const MAX_WATER_MASS = 1000;
 const MIN_WATER_PRESSURE = 500;
-const MIN_WATER = 50;
+const MIN_WATER = 500;
 const ERROR_RATE = 0.01;
 const GRAVITY_FORCE = 5;
 const AIR_FRICION = 1.5;
 const AIR_MAX_FORCE = 10;
-const WATER_PRESSURE = 1.01;
+const WATER_PRESSURE = 1.001;
 const WATER_FLOW_SPEED = 0.5;
+const WATER_SPILL_OVER_MASS = 900;
 
 function _log(...args) {
   // console.log(...args);
@@ -507,9 +508,9 @@ function simulate(grid) {
           // check if there is any evicting air left in the tile.
           if (tile.evictContent && tile.evictContent.name === 'air') {
             const newMass = diffMass + tile.evictContent.mass;
-            tile.replaceContent(new Air(newMass));
             // the evict content is now evicted to this same tile
             tile.evictContent = null;
+            tile.replaceContent(new Air(newMass));
           } else {
             // put air in the tile, this will evict the previous content of the tile
             tile.setContent(new Air(diffMass));
@@ -544,15 +545,17 @@ function simulate(grid) {
         if (tile.content.isWaterFlowable()) {
           // check if there is any evicting water left in the tile.
           if (tile.evictContent && tile.evictContent.name === 'water') {
+            _log('merge water', diffMass, tile.evictContent.mass);
             // Merge the evicting water with the diff water to fill the tile
             // with water again.
             // This happen when the water is reqested to evict the tile but then
             // there are water in other tiles pour in in the same iteration.
             const newMass = diffMass + tile.evictContent.mass;
-            tile.replaceContent(new Water(newMass));
             // the evict content is now evicted to this same tile
             tile.evictContent = null;
+            tile.replaceContent(new Water(newMass));
           } else {
+            _log('replace water', diffMass, tile.evictContent);
             // if no thing to evict, we can now replace the tile with water
             // this will also evict the current content in the tile.
             tile.replaceContent(new Water(diffMass));
@@ -605,6 +608,14 @@ function flowAir(content, diff, { top, right, bottom, left }, evict = false) {
 
     if (totalFlowMass <= 0) {
       return;
+    }
+
+    // Nowhere for air to evict
+    if (forces.length === 0) {
+      // Bubble up the air to the nearby water, priority the top one
+      // TODO: rethink about the content model?
+      // TODO: each tile can contains multiple content, they interact with each
+      // TODO: other in there?
     }
 
     forces.forEach(([dest, force]) => {
@@ -704,7 +715,7 @@ function flowWater(content, diff, { top, right, bottom, left }, evict = false) {
 
       _log('flow left', left.content.mass, left.content.name);
 
-      if (remaining > waterMass) {
+      if (remaining - waterMass >= WATER_SPILL_OVER_MASS) {
         let flowMass = (remaining - waterMass) / 3;
         if (remaining - flowMass <= ERROR_RATE) {
           flowMass = remaining;
@@ -724,7 +735,7 @@ function flowWater(content, diff, { top, right, bottom, left }, evict = false) {
         waterMass = right.content.mass;
       }
 
-      if (remaining > waterMass) {
+      if (remaining - waterMass >= WATER_SPILL_OVER_MASS) {
         let flowMass = (remaining - waterMass) / 3;
         if (remaining - flowMass <= ERROR_RATE) {
           flowMass = remaining;
