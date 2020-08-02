@@ -1,13 +1,9 @@
 const MAX_WATER_MASS = 1000;
-const MIN_WATER_PRESSURE = 500;
-const MIN_WATER = 500;
+const MIN_WATER = 50;
 const ERROR_RATE = 0.01;
-const GRAVITY_FORCE = 5;
-const AIR_FRICION = 1.5;
 const AIR_MAX_FORCE = 10;
-const WATER_PRESSURE = 1.001;
-const WATER_FLOW_SPEED = 0.5;
-const WATER_SPILL_OVER_MASS = 900;
+const WATER_PRESSURE = 1.01;
+const WATER_SPILL_OVER_MASS = 0;
 
 function _log(...args) {
   // console.log(...args);
@@ -616,6 +612,8 @@ function flowAir(content, diff, { top, right, bottom, left }, evict = false) {
       // TODO: rethink about the content model?
       // TODO: each tile can contains multiple content, they interact with each
       // TODO: other in there?
+      //
+      // TODO: even distribute a pressurized water/air?
     }
 
     forces.forEach(([dest, force]) => {
