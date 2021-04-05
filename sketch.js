@@ -5,8 +5,16 @@ const ERROR_RATE = 0.01;
 const GRAVITY_FORCE = 5;
 const AIR_FRICION = 1.5;
 const AIR_MAX_FORCE = 10;
-const WATER_PRESSURE = 1.01;
+const WATER_PRESSURE = 1.02;
 const WATER_FLOW_SPEED = 0.5;
+
+let showMass = false;
+let grid;
+let simulating = true;
+let isPainting = false;
+let debugDiv;
+
+boats = [];
 
 function _log(...args) {
   // console.log(...args);
@@ -32,7 +40,7 @@ class Grid {
   draw() {
     this.update();
 
-    this.iterateTiles(tile => {
+    this.iterateTiles((tile) => {
       tile.draw();
     });
 
@@ -176,13 +184,15 @@ class Air extends Content {
       this.containerTile.size,
       this.containerTile.size
     );
-    fill('black');
-    text(
-      Math.floor(this.mass * 10) / 10,
-      this.containerTile.i * this.containerTile.size,
-      this.containerTile.j * this.containerTile.size +
-        this.containerTile.size / 3
-    );
+    if (showMass) {
+      fill('black');
+      text(
+        Math.floor(this.mass * 10) / 10,
+        this.containerTile.i * this.containerTile.size,
+        this.containerTile.j * this.containerTile.size +
+          this.containerTile.size / 3
+      );
+    }
     pop();
   }
 
@@ -286,13 +296,15 @@ class Water extends Content {
       );
     }
 
-    fill('black');
-    text(
-      Math.floor(this.mass * 10) / 10,
-      this.containerTile.i * this.containerTile.size,
-      this.containerTile.j * this.containerTile.size +
-        this.containerTile.size / 3
-    );
+    if (showMass) {
+      fill('black');
+      text(
+        Math.floor(this.mass * 10) / 10,
+        this.containerTile.i * this.containerTile.size,
+        this.containerTile.j * this.containerTile.size +
+          this.containerTile.size / 3
+      );
+    }
     pop();
   }
 
@@ -338,19 +350,15 @@ class Rock extends Content {
   }
 }
 
-let grid;
-let simulating = false;
-let isPainting = false;
-let debugDiv;
-
 function setup() {
   createCanvas(600, 600);
   // grid = new Grid(5, 5, 120);
   // grid = new Grid(10, 10, 60);
   grid = new Grid(20, 20, 30);
+  // grid = new Grid(30, 30, 20);
   // grid = new Grid(40, 40, 15);
-  debugDiv = createDiv('hello');
-  massCheckDiv = createDiv('hello');
+  debugDiv = createDiv('debug');
+  massCheckDiv = createDiv('massCheck');
 }
 
 function draw() {
@@ -368,6 +376,10 @@ function draw() {
       targetedTile.replaceContent(new Water());
     }
   }
+
+  boats.forEach((boat) => {
+    boat.draw();
+  });
 }
 
 function mousePressed() {
@@ -423,13 +435,23 @@ function keyPressed() {
     targetedTile.replaceContent(new Vaccum());
   }
 
+  if (keyCode === 83) {
+    // s
+    showMass = !showMass;
+  }
+
   if (keyCode === 77) {
     // m
     massCheck();
   }
+
+  if (keyCode === 66) {
+    // b
+    addBoat();
+  }
 }
 
-document.oncontextmenu = function() {
+document.oncontextmenu = function () {
   return false;
 };
 
@@ -438,7 +460,7 @@ function simulate(grid) {
   const airDiff = {};
   const waterDiff = {};
 
-  grid.iterateTiles(tile => {
+  grid.iterateTiles((tile) => {
     const neighbours = grid.getNeighbourTiles(tile);
     if (tile.content instanceof Water) {
       _log('diff before flow water', JSON.stringify(waterDiff, null, 2));
@@ -469,8 +491,8 @@ function simulate(grid) {
 
   // Diff check
   let totalMass = 0;
-  Object.keys(airDiff).forEach(i => {
-    Object.keys(airDiff[i]).forEach(j => {
+  Object.keys(airDiff).forEach((i) => {
+    Object.keys(airDiff[i]).forEach((j) => {
       totalMass += airDiff[i][j];
     });
   });
@@ -480,8 +502,8 @@ function simulate(grid) {
   }
 
   totalMass = 0;
-  Object.keys(waterDiff).forEach(i => {
-    Object.keys(waterDiff[i]).forEach(j => {
+  Object.keys(waterDiff).forEach((i) => {
+    Object.keys(waterDiff[i]).forEach((j) => {
       totalMass += waterDiff[i][j];
     });
   });
@@ -491,8 +513,8 @@ function simulate(grid) {
   }
 
   // Apply airDiff
-  Object.keys(airDiff).forEach(i => {
-    Object.keys(airDiff[i]).forEach(j => {
+  Object.keys(airDiff).forEach((i) => {
+    Object.keys(airDiff[i]).forEach((j) => {
       const diffMass = airDiff[i][j];
       const tile = grid.data[i][j];
 
@@ -523,8 +545,8 @@ function simulate(grid) {
     });
   });
 
-  Object.keys(waterDiff).forEach(i => {
-    Object.keys(waterDiff[i]).forEach(j => {
+  Object.keys(waterDiff).forEach((i) => {
+    Object.keys(waterDiff[i]).forEach((j) => {
       const diffMass = waterDiff[i][j];
       const tile = grid.data[i][j];
 
@@ -619,7 +641,7 @@ function flowAir(content, diff, { top, right, bottom, left }, evict = false) {
 
   const forces = [];
 
-  [top, right, bottom, left].forEach(dest => {
+  [top, right, bottom, left].forEach((dest) => {
     if (dest && dest.content.isAirFlowable()) {
       let force = content.mass / dest.content.mass;
 
@@ -656,10 +678,10 @@ function flowWater(content, diff, { top, right, bottom, left }, evict = false) {
     _log('flowWater/evict', content);
     // Let water exit at all direction equally, seem to be an ok strategy
     const directions = [top, right, bottom, left].filter(
-      direction => direction && direction.content.isWaterFlowable()
+      (direction) => direction && direction.content.isWaterFlowable()
     );
     const flowMass = remaining / directions.length;
-    directions.forEach(direction => {
+    directions.forEach((direction) => {
       addMass(diff, direction.i, direction.j, flowMass);
       lostMass += flowMass;
     });
@@ -801,7 +823,7 @@ function massCheck() {
   let massDict = {};
   let evictDict = {};
 
-  grid.iterateTiles(tile => {
+  grid.iterateTiles((tile) => {
     massDict[tile.content.name] = massDict[tile.content.name] || 0;
     massDict[tile.content.name] += tile.content.mass;
     if (tile.evictContent) {
@@ -818,3 +840,5 @@ function massCheck() {
   }
   showDebug(massCheckDiv, { evictDict, massDict });
 }
+
+function addBoat() {}
