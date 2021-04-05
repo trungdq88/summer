@@ -7,6 +7,7 @@ const AIR_FRICION = 1.5;
 const AIR_MAX_FORCE = 10;
 const WATER_PRESSURE = 1.02;
 const WATER_FLOW_SPEED = 0.5;
+const TILE_SIZE = 20;
 
 let showMass = false;
 let grid;
@@ -14,7 +15,74 @@ let simulating = true;
 let isPainting = false;
 let debugDiv;
 
-boats = [];
+class Boat {
+  constructor(environment) {
+    this.environment = environment;
+    this.position = { x: mouseX, y: mouseY };
+    this.velocity = { x: 0, y: 0 };
+    this.drag = 0.95;
+    this.acceleration = { x: 0, y: 0.1 };
+    this.waterLevel = 0;
+  }
+
+  draw() {
+    const tile = this.environment.getSurroundings(this.position);
+
+    if (tile.content.name === 'water') {
+      this.acceleration = { x: 0, y: -0.1 };
+      this.waterLevel = tile.content.mass / MAX_WATER_MASS;
+    } else if (tile.content.name === 'vaccum') {
+      this.acceleration = { x: 0, y: 0.1 };
+    } else if (tile.content.name === undefined) {
+      this.acceleration = { x: 0, y: -0.1 };
+    }
+
+    // console.log('water level', this.waterLevel);
+
+    const { left, right } = this.environment.getNeighbourTiles(tile);
+
+    let slope = 0;
+
+    if (
+      left &&
+      left.content.name == 'water' &&
+      right &&
+      right.content.name == 'water'
+    ) {
+      if (left.content.mass < tile.content.mass) {
+        slope = -0.1 * (left.content.mass / tile.content.mass);
+      } else if (right.content.mass < tile.content.mass) {
+        slope = 0.1 * (right.content.mass / tile.content.mass);
+      } else {
+        slope = 0;
+      }
+    }
+
+    this.position.x += this.velocity.x;
+    this.position.y += this.velocity.y;
+
+    this.velocity.x += this.acceleration.x + slope;
+    this.velocity.y += this.acceleration.y;
+
+    this.velocity.x *= this.drag * this.drag;
+    this.velocity.y *= this.drag;
+
+    // console.log(this.velocity.x);
+
+    // console.log(this);
+
+    push();
+    textSize(30);
+    text(
+      '⛵️',
+      this.position.x,
+      this.position.y + (1 - this.waterLevel) * TILE_SIZE
+    );
+    pop();
+  }
+}
+
+const boats = [];
 
 function _log(...args) {
   // console.log(...args);
@@ -35,6 +103,10 @@ class Grid {
       }
       this.data.push(line);
     }
+  }
+
+  getSurroundings(position) {
+    return this.tileAt(position.x, position.y);
   }
 
   draw() {
@@ -354,11 +426,13 @@ function setup() {
   createCanvas(600, 600);
   // grid = new Grid(5, 5, 120);
   // grid = new Grid(10, 10, 60);
-  grid = new Grid(20, 20, 30);
+  grid = new Grid(TILE_SIZE, TILE_SIZE, 30);
   // grid = new Grid(30, 30, 20);
   // grid = new Grid(40, 40, 15);
   debugDiv = createDiv('debug');
   massCheckDiv = createDiv('massCheck');
+
+  // boats.push(new Boat(grid));
 }
 
 function draw() {
@@ -448,6 +522,17 @@ function keyPressed() {
   if (keyCode === 66) {
     // b
     addBoat();
+  }
+
+  if (keyCode === 190) {
+    console.log('right');
+    boats.forEach((boat) => (boat.velocity.x += 2));
+  }
+
+  if (keyCode === 188) {
+    // ,
+    console.log('left');
+    boats.forEach((boat) => (boat.velocity.x -= 2));
   }
 }
 
@@ -841,4 +926,6 @@ function massCheck() {
   showDebug(massCheckDiv, { evictDict, massDict });
 }
 
-function addBoat() {}
+function addBoat() {
+  boats.push(new Boat(grid));
+}
