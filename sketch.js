@@ -563,6 +563,8 @@ function setup() {
   Press "c": Destroy everything 💥
   <p>
     <a href="https://twitter.com/tdinh_me">Follow me on twitter 🦜</a>
+
+    <a href="https://github.com/trungdq88/summer">GitHub</a>
   </p>
   </pre>
   `);
