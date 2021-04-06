@@ -562,7 +562,7 @@ function setup() {
   Press "2": move boat to the right ➡️
   Press "c": Destroy everything 💥
   <p>
-    <a href="https://twitter.com/tdinh_me">Follow me on twitter</a>
+    <a href="https://twitter.com/tdinh_me">Follow me on twitter 🦜</a>
   </p>
   </pre>
   `);
