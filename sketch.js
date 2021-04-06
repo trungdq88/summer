@@ -14,11 +14,12 @@ let grid;
 let simulating = true;
 let isPainting = false;
 let debugDiv;
+let boats = [];
 
 class Boat {
-  constructor(environment) {
+  constructor(environment, position) {
     this.environment = environment;
-    this.position = { x: mouseX, y: mouseY };
+    this.position = position || { x: mouseX, y: mouseY };
     this.velocity = { x: 0, y: 0 };
     this.drag = 0.95;
     this.acceleration = { x: 0, y: 0.1 };
@@ -28,6 +29,10 @@ class Boat {
   }
 
   canMove(tile) {
+    if (!tile) {
+      return false;
+    }
+
     const bottom = tile.getBottom();
     return (
       (tile.content.name === 'water' && tile.content.mass > 100) ||
@@ -48,17 +53,19 @@ class Boat {
 
     const { left, right, bottom } = this.environment.getNeighbourTiles(tile);
 
-    const underWater = tile.content.name === 'water' && tile.content.mass > 100;
+    let waterLevel = 9999;
+    let waterTile = null;
 
-    // ((bottom.content.solid && tile.content.mass > 100) ||
-    //   bottom.content.name === 'water') &&
-    // console.log(
-    //   tile.content.name,
-    //   underWater,
-    //   this.position.y + this.size,
-    //   tile.getPositionBottom() -
-    //     TILE_SIZE * (tile.content.mass / MAX_WATER_MASS)
-    // );
+    [tile, bottom].forEach((t) => {
+      if (t && t.content.name === 'water') {
+        waterLevel =
+          t.getPositionBottom() - TILE_SIZE * (t.content.mass / MAX_WATER_MASS);
+        waterTile = t;
+      }
+    });
+
+    const underWater =
+      this.position.y + this.size > waterLevel && waterTile.content.mass > 100;
 
     if (underWater) {
       this.acceleration = { x: 0, y: -0.1 };
@@ -73,27 +80,32 @@ class Boat {
 
     let slope = 0;
 
-    if (
-      left &&
-      left.content.name == 'water' &&
-      left.content.mass > 100 &&
-      right &&
-      right.content.name == 'water' &&
-      right.content.mass > 100
-    ) {
-      if (left.content.mass < tile.content.mass) {
-        slope = -0.1 * (left.content.mass / tile.content.mass);
-      } else if (right.content.mass < tile.content.mass) {
-        slope = 0.1 * (right.content.mass / tile.content.mass);
-      } else {
-        slope = 0;
+    if (waterTile) {
+      const neighbours = this.environment.getNeighbourTiles(waterTile);
+      const waterLeft = neighbours.left;
+      const waterRight = neighbours.right;
+
+      if (
+        waterLeft &&
+        waterLeft.content.name == 'water' &&
+        waterLeft.content.mass > 100 &&
+        waterRight &&
+        waterRight.content.name == 'water' &&
+        waterRight.content.mass > 100
+      ) {
+        if (waterLeft.content.mass < waterTile.content.mass) {
+          slope -= 0.5 * (1 - waterLeft.content.mass / waterTile.content.mass);
+        }
+        if (waterRight.content.mass < waterTile.content.mass) {
+          slope += 0.5 * (1 - waterRight.content.mass / waterTile.content.mass);
+        }
       }
     }
 
     this.position.x += this.velocity.x;
     this.position.y += this.velocity.y;
 
-    this.velocity.x += this.acceleration.x;
+    this.velocity.x += this.acceleration.x + slope;
     this.velocity.y += this.acceleration.y;
 
     this.velocity.x *= this.drag * this.drag;
@@ -169,8 +181,6 @@ class Boat {
     }
   }
 }
-
-const boats = [];
 
 function _log(...args) {
   // console.log(...args);
@@ -304,11 +314,13 @@ class Tile {
     this.content.draw();
   }
 
-  replaceContent(newContent) {
+  replaceContent(newContent, evict = true) {
     if (newContent.name === this.content.name) {
       return;
     }
-    this.evictContent = this.content;
+    if (evict) {
+      this.evictContent = this.content;
+    }
     this.content = newContent;
     this.content.setContainerTile(this);
   }
@@ -540,9 +552,22 @@ function setup() {
   grid = new Grid(TILE_SIZE, TILE_SIZE, 30);
   // grid = new Grid(30, 30, 20);
   // grid = new Grid(40, 40, 15);
-  debugDiv = createDiv('debug');
-  massCheckDiv = createDiv('massCheck');
+  debugDiv = createDiv(`
+  <pre>
+  Left Click: draw rocks 🟫
+  Right click: draw water 💧
+  Shift + click: destroy ❌
+  Press "b": create a boat ⛵️
+  Press "1": move boat to the left ⬅️
+  Press "2": move boat to the right ➡️
+  Press "c": Destroy everything 💥
+  <p>
+    <a href="https://twitter.com/tdinh_me">Follow me on twitter</a>
+  </p>
+  </pre>
+  `);
 
+  prefill();
   // boats.push(new Boat(grid));
 }
 
@@ -555,10 +580,14 @@ function draw() {
     if (!targetedTile) {
       return;
     }
-    if (mouseButton === LEFT) {
-      targetedTile.replaceContent(new Rock());
+    if (keyIsDown(SHIFT)) {
+      targetedTile.replaceContent(new Vaccum(), false);
     } else {
-      targetedTile.replaceContent(new Water());
+      if (mouseButton === LEFT) {
+        targetedTile.replaceContent(new Rock());
+      } else {
+        targetedTile.replaceContent(new Water());
+      }
     }
   }
 
@@ -635,13 +664,19 @@ function keyPressed() {
     addBoat();
   }
 
-  if (keyCode === 190) {
-    // .
+  if (keyCode === 50) {
+    // 2
     boats.forEach((boat) => boat.goRight());
   }
 
-  if (keyCode === 188) {
-    // ,
+  if (keyCode === 67) {
+    // c
+    grid = new Grid(TILE_SIZE, TILE_SIZE, 30);
+    boats = [];
+  }
+
+  if (keyCode === 49) {
+    // 1
     boats.forEach((boat) => boat.goLeft());
   }
 }
@@ -791,7 +826,7 @@ function mouseMoved() {
   if (!targetedTile) {
     return;
   }
-  showDebug(debugDiv, targetedTile.content.debug());
+  // showDebug(debugDiv, targetedTile.content.debug());
 }
 
 function showDebug(div, obj) {
@@ -1039,4 +1074,34 @@ function massCheck() {
 
 function addBoat() {
   boats.push(new Boat(grid));
+}
+
+function prefill() {
+  grid = new Grid(TILE_SIZE, TILE_SIZE, 30);
+
+  const data = [
+    { i: 6, j: 6, content: new Rock() },
+    { i: 6, j: 7, content: new Rock() },
+    { i: 6, j: 8, content: new Rock() },
+    { i: 6, j: 9, content: new Rock() },
+    { i: 6, j: 10, content: new Rock() },
+    { i: 7, j: 10, content: new Rock() },
+    { i: 8, j: 10, content: new Rock() },
+    { i: 9, j: 10, content: new Rock() },
+    { i: 10, j: 10, content: new Rock() },
+    { i: 11, j: 10, content: new Rock() },
+    { i: 12, j: 10, content: new Rock() },
+    { i: 13, j: 9, content: new Rock() },
+    { i: 14, j: 8, content: new Rock() },
+    { i: 15, j: 7, content: new Rock() },
+    { i: 16, j: 6, content: new Rock() },
+    { i: 10, j: 5, content: new Water(20000) }
+  ];
+
+  data.forEach(({ i, j, content }) => {
+    const targetedTile = grid.data[i][j];
+    targetedTile.replaceContent(content);
+  });
+
+  boats.push(new Boat(grid, { x: 300, y: 100 }));
 }
