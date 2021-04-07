@@ -554,8 +554,8 @@ function setup() {
   // grid = new Grid(40, 40, 15);
   debugDiv = createDiv(`
   <pre>
-  Left Click: draw rocks 🟫
-  Right click: draw water 💧
+  Left Click: draw rocks 🟫 (or press "r")
+  Right click: draw water 💧 (or press "w")
   Shift + click: destroy ❌
   Press "b": create a boat ⛵️
   Press "1": move boat to the left ⬅️
