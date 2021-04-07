@@ -568,6 +568,13 @@ function setup() {
     macOS app for you: <a href="https://devutils.app/">check it out!</a>
 
     <a href="https://github.com/trungdq88/summer">Code on GitHub</a>
+
+    Not sure what to do? Check this out 👇
+    <a style="text-decoration: none" href="https://twitter.com/tdinh_me/status/1379606726932983808">
+    View clips
+
+    <img height="200px" src="https://trungdq88.github.io/summer/demo.png" />
+    </a>
   </p>
   </pre>
   `);
