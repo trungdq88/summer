@@ -564,7 +564,9 @@ function setup() {
   <p>
     <a href="https://twitter.com/tdinh_me">Follow me on twitter 🦜</a>
 
-    <a href="https://github.com/trungdq88/summer">GitHub</a>
+    If you are a developer: <a href="https://devutils.app/">checkout my macOS app</a>
+
+    <a href="https://github.com/trungdq88/summer">Code on GitHub</a>
   </p>
   </pre>
   `);
